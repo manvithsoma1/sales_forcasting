@@ -1,40 +1,19 @@
+```python
 import pandas as pd
 import numpy as np
 
 class FeatureEngineer:
     def __init__(self):
         pass
-def create_features(self, df):
+
+    def create_features(self, df):
         df = df.copy()
         
         # Ensure 'date' is datetime
-        if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
-             df['date'] = pd.to_datetime(df['date'])
-
-        # Define the columns we expect the model to need
-        cols_to_keep = [
-            'onpromotion',
-            'dcoilwtico',
-            'is_holiday',
-            'transactions',
-            'is_weekend',
-            'is_payday'
-        ]
-
-        # --- SAFETY PATCH: Create missing columns with 0 instead of crashing ---
-        for col in cols_to_keep:
-            if col not in df.columns:
-                print(f" Warning: '{col}' missing in features.py. Filling with 0.")
-                df[col] = 0
-        # -----------------------------------------------------------------------
-
-        # Now it is safe to select them because we guaranteed they exist above
-        df_featured = df[cols_to_keep].copy()
-        
-        print(f"Features created. Columns: {df_featured.columns.tolist()}")
-        return df_featured
-        # Ensure datetime
-        df['date'] = pd.to_datetime(df['date'])
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+        else:
+            raise ValueError("DataFrame must have a 'date' column.")
 
         # --------------------
         # Time-based features
@@ -59,28 +38,36 @@ def create_features(self, df):
         # --------------------
         cols_to_keep = [
             'date',
-            'sales',
+            'sales',      # Target (keep for modeling)
             'onpromotion',
             'dcoilwtico',
             'is_holiday',
+            'transactions',
+            'is_weekend',
+            'is_payday',
             'day_of_week',
             'month',
-            'is_payday'
+            'day_of_year'  # Optional: include if useful for seasonality
         ]
 
-       # --- SAFE MODE FIX: Only keep columns that actually exist ---
-        # calculate "actual" columns present in the dataframe
+        # --- SAFE MODE FIX: Only keep columns that actually exist ---
+        # Calculate "actual" columns present in the dataframe
         valid_cols = [c for c in cols_to_keep if c in df.columns]
         
         # If important columns are missing (Cloud Demo Mode), add them as 0
-        missing_cols = set(cols_to_keep) - set(valid_cols)
+        missing_cols = set(cols_to_keep) - set(df.columns)
         if missing_cols:
             print(f"⚠️ Warning: Missing columns {missing_cols}. Filling with 0.")
             for c in missing_cols:
-                df[c] = 0  # Fill missing columns with 0 to prevent crash
+                if c not in ['date', 'sales']:  # Don't overwrite these if they exist
+                    df[c] = 0  # Fill missing columns with 0 to prevent crash
+        
+        # Update cols_to_keep to only include now-existing columns
+        cols_to_keep = [c for c in cols_to_keep if c in df.columns]
         
         df_featured = df[cols_to_keep].copy()
         # -----------------------------------------------------------
 
         print(f"Features created. Columns: {df_featured.columns.tolist()}")
         return df_featured
+```
