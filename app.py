@@ -29,15 +29,35 @@ def load_resources():
     except Exception as e:
         st.error(f"❌ Model loading failed: {e}")
         return None, None
-
+# --------------------------------------------------
+# LOAD & FILTER DATA (CACHED)
+# --------------------------------------------------
 @st.cache_data
 def load_data():
-    loader = DataLoader()
-    raw = loader.load_raw_data()
-    df = loader.merge_data(raw)
-    df = df[(df["store_nbr"] == 1) & (df["family"] == "GROCERY I")].sort_values("date")
-    return df.tail(1000)
-
+    # 1. Try loading the full pipeline (Local Machine)
+    if os.path.exists("data/raw/train.csv"):
+        loader = DataLoader()
+        raw = loader.load_raw_data()
+        df = loader.merge_data(raw)
+        
+        # Filter
+        df = df[
+            (df["store_nbr"] == 1) &
+            (df["family"] == "GROCERY I")
+        ].sort_values("date")
+        
+        return df.tail(1000)
+    
+    # 2. Fallback to Demo Data (GitHub/Cloud)
+    elif os.path.exists("demo_data.csv"):
+        print("⚠️ Big data not found. Using Demo Data.")
+        df = pd.read_csv("demo_data.csv")
+        df['date'] = pd.to_datetime(df['date']) # Ensure date format
+        return df.tail(1000)
+        
+    else:
+        st.error("❌ No data found! Please upload 'demo_data.csv' to GitHub.")
+        st.stop()
 model, scaler = load_resources()
 df = load_data()
 
