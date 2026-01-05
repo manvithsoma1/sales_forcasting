@@ -3,19 +3,53 @@ import numpy as np
 
 class FeatureEngineer:
     def __init__(self):
-        self.window_size = 30
-        
-    def create_features(self, df):
-        df = df.copy()
-        
-        # Ensure 'date' is datetime
-        if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
-             df['date'] = pd.to_datetime(df['date'])
+        pass
 
-        # --- CRITICAL SECTION: COLUMNS TO KEEP ---
-        # 'sales' MUST be the first item. Do not remove it.
+    def create_features(self, df):
+        print("Engineering features...")
+        df = df.copy()
+
+        # -----------------------------
+        # Date is mandatory
+        # -----------------------------
+        if 'date' not in df.columns:
+            raise ValueError("❌ 'date' column is required")
+
+        df['date'] = pd.to_datetime(df['date'])
+
+        # -----------------------------
+        # Ensure required base columns
+        # -----------------------------
+        required_defaults = {
+            'sales': 0,          # TARGET (MUST EXIST)
+            'onpromotion': 0,
+            'dcoilwtico': 0.0,
+            'is_holiday': 0,
+            'transactions': 0
+        }
+
+        for col, default in required_defaults.items():
+            if col not in df.columns:
+                print(f"⚠️ Warning: '{col}' missing. Filling with {default}.")
+                df[col] = default
+
+        # -----------------------------
+        # Time-based features
+        # -----------------------------
+        df['is_weekend'] = np.where(df['date'].dt.dayofweek >= 5, 1, 0)
+
+        df['is_payday'] = np.where(
+            (df['date'].dt.day == 15) | (df['date'].dt.is_month_end),
+            1,
+            0
+        )
+
+        # -----------------------------
+        # FINAL MODEL FEATURES
+        # sales MUST be index 0
+        # -----------------------------
         cols_to_keep = [
-            'sales',         # <--- TARGET VARIABLE (VITAL)
+            'sales',        # index 0 (target)
             'onpromotion',
             'dcoilwtico',
             'is_holiday',
@@ -24,19 +58,7 @@ class FeatureEngineer:
             'is_payday'
         ]
 
-        # --- SAFETY CHECK: Fill missing columns with 0 ---
-        for col in cols_to_keep:
-            if col not in df.columns:
-                # If sales is missing, we must warn loudly
-                if col == 'sales':
-                    print("⚠️ CRITICAL: 'sales' column missing in input! Filling with 0.")
-                else:
-                    print(f"⚠️ Warning: '{col}' missing. Filling with 0.")
-                df[col] = 0
-        # -------------------------------------------------
-
-        # Select columns
         df_featured = df[cols_to_keep].copy()
-        
+
         print(f"Features created. Columns: {df_featured.columns.tolist()}")
         return df_featured
