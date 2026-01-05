@@ -12,10 +12,10 @@ class FeatureEngineer:
         if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
              df['date'] = pd.to_datetime(df['date'])
 
-        # Define the columns we expect
-        # CRITICAL FIX: Added 'sales' back to this list!
+        # --- DEFINING COLUMNS ---
+        # CRITICAL: 'sales' MUST be here because the scaler expects it.
         cols_to_keep = [
-            'sales',          # <--- THIS WAS MISSING
+            'sales',          # <--- VITAL: DO NOT REMOVE
             'onpromotion',
             'dcoilwtico',
             'is_holiday',
@@ -24,14 +24,20 @@ class FeatureEngineer:
             'is_payday'
         ]
 
-        # --- SAFETY PATCH: Create missing columns with 0 instead of crashing ---
+        # --- SAFETY PATCH: Fill missing columns with 0 ---
+        # This prevents the app from crashing if helper files are imperfect
         for col in cols_to_keep:
             if col not in df.columns:
-                print(f"⚠️ Warning: '{col}' missing in features.py. Filling with 0.")
+                # If 'sales' is missing, we are in trouble, but let's try to handle it gracefully
+                if col == 'sales':
+                    print("⚠️ CRITICAL WARNING: 'sales' column missing! Filling with 0 (Prediction will be flat).")
+                else:
+                    print(f"⚠️ Warning: '{col}' missing. Filling with 0.")
+                
                 df[col] = 0
-        # -----------------------------------------------------------------------
+        # -------------------------------------------------
 
-        # Now it is safe to select them
+        # Select only the columns we need
         df_featured = df[cols_to_keep].copy()
         
         print(f"Features created. Columns: {df_featured.columns.tolist()}")
