@@ -49,7 +49,19 @@ class FeatureEngineer:
             'is_payday'
         ]
 
+       # --- SAFE MODE FIX: Only keep columns that actually exist ---
+        # calculate "actual" columns present in the dataframe
+        valid_cols = [c for c in cols_to_keep if c in df.columns]
+        
+        # If important columns are missing (Cloud Demo Mode), add them as 0
+        missing_cols = set(cols_to_keep) - set(valid_cols)
+        if missing_cols:
+            print(f"⚠️ Warning: Missing columns {missing_cols}. Filling with 0.")
+            for c in missing_cols:
+                df[c] = 0  # Fill missing columns with 0 to prevent crash
+        
         df_featured = df[cols_to_keep].copy()
+        # -----------------------------------------------------------
 
         print(f"Features created. Columns: {df_featured.columns.tolist()}")
         return df_featured
