@@ -5,3 +5,7 @@ tensorflow
 pyyaml
 matplotlib
 seaborn
+joblib
+streamlit
+requests
+plotly 
