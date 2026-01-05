@@ -1,0 +1,16 @@
+data:
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+  files:
+    train: "train.csv"
+    test: "test.csv"
+    stores: "stores.csv"
+    oil: "oil.csv"
+    holidays: "holidays_events.csv"
+    transactions: "transactions.csv"
+
+model:
+  type: "LSTM"
+  look_back_days: 30   # Use past 30 days to predict next day
+  batch_size: 32
+  epochs: 20
