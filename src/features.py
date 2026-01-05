@@ -12,8 +12,10 @@ class FeatureEngineer:
         if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
              df['date'] = pd.to_datetime(df['date'])
 
-        # Define the columns we expect the model to need
+        # Define the columns we expect
+        # CRITICAL FIX: Added 'sales' back to this list!
         cols_to_keep = [
+            'sales',          # <--- THIS WAS MISSING
             'onpromotion',
             'dcoilwtico',
             'is_holiday',
@@ -29,7 +31,7 @@ class FeatureEngineer:
                 df[col] = 0
         # -----------------------------------------------------------------------
 
-        # Now it is safe to select them because we guaranteed they exist above
+        # Now it is safe to select them
         df_featured = df[cols_to_keep].copy()
         
         print(f"Features created. Columns: {df_featured.columns.tolist()}")
