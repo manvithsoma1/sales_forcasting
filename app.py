@@ -10,13 +10,12 @@ from tensorflow.keras.models import load_model
 from src.data_loader import DataLoader
 from src.features import FeatureEngineer
 from src.preprocessing import Preprocessor
-from src.weather_service import get_current_weather # <--- NEW IMPORT
+from src.weather_service import get_current_weather
 
 # --- CONFIG ---
 st.set_page_config(page_title="Dynamic Pricing AI", layout="wide")
 
 # --- API KEY INPUT (For Security) ---
-# In a real app, use st.secrets. For now, asking user or hardcode it.
 if "weather_api_key" not in st.session_state:
     st.session_state["weather_api_key"] = ""
 
@@ -30,68 +29,81 @@ def load_resources():
     except Exception as e:
         st.error(f"❌ Model loading failed: {e}")
         return None, None
+
 # --------------------------------------------------
-# LOAD & FILTER DATA (CACHED)
+# LOAD & FILTER DATA (REAL ZIPPED DATA)
 # --------------------------------------------------
 @st.cache_data
 def load_data():
-    # 1. Try loading the full pipeline (Local Machine)
-    if os.path.exists("data/raw/train.csv"):
-        loader = DataLoader()
-        raw = loader.load_raw_data()
-        df = loader.merge_data(raw)
+    # Define paths
+    zip_path = "data/raw/train.zip"
+    oil_path = "data/raw/oil.csv"
+    stores_path = "data/raw/stores.csv"
+    trans_path = "data/raw/transactions.csv"
+    holidays_path = "data/raw/holidays_events.csv"
+
+    # Check if the Zip file exists
+    if os.path.exists(zip_path):
+        # print("📦 Loading REAL data from ZIP...")
         
+        # 1. READ DIRECTLY FROM ZIP (Pandas can do this!)
+        raw = pd.read_csv(zip_path, compression='zip')
+        
+        # 2. LOAD REAL HELPER FILES
+        try:
+            oil = pd.read_csv(oil_path)
+            stores = pd.read_csv(stores_path)
+            trans = pd.read_csv(trans_path)
+            holidays = pd.read_csv(holidays_path)
+        except FileNotFoundError as e:
+            st.error(f"❌ Missing helper file: {e}. Please check GitHub.")
+            st.stop()
+
+        # 3. MERGE DATA (Recreating the original pipeline)
+        # Convert dates
+        raw['date'] = pd.to_datetime(raw['date'])
+        oil['date'] = pd.to_datetime(oil['date'])
+        holidays['date'] = pd.to_datetime(holidays['date'])
+        
+        # Merge Oil
+        df = pd.merge(raw, oil, on='date', how='left')
+        
+        # Merge Stores
+        df = pd.merge(df, stores, on='store_nbr', how='left')
+        
+        # Merge Holidays (Simplified Logic)
+        holidays = holidays[~holidays['transferred']]
+        holidays = holidays[['date', 'locale', 'description']]
+        holidays = holidays.drop_duplicates(subset=['date']) 
+        df = pd.merge(df, holidays, on='date', how='left')
+        
+        # Create the 'is_holiday' flag
+        df['is_holiday'] = df['locale'].notnull().astype(int)
+
+        # Fill Oil Missing Values (Interpolation)
+        df['dcoilwtico'] = df['dcoilwtico'].ffill().bfill()
+
+        # 4. FILTER (Crucial for Cloud Memory!)
         # Filter for Store 1, Grocery I
-        df = df[
+        df_filtered = df[
             (df["store_nbr"] == 1) &
             (df["family"] == "GROCERY I")
         ].sort_values("date")
         
-        return df.tail(1000)
-    
-    # 2. Fallback to Demo Data (GitHub/Cloud)
-    elif os.path.exists("demo_data.csv"):
-        # print("⚠️ Big data not found. Using Demo Data.")
-        df = pd.read_csv("demo_data.csv")
-        df['date'] = pd.to_datetime(df['date'])
-        
-        # --- REPAIR: Add Missing Columns for Cloud Demo ---
-        
-        # 1. Fix 'dcoilwtico' (Oil Price)
-        if 'dcoilwtico' not in df.columns:
-            df['dcoilwtico'] = 50.0  # Set a default average price
-
-        # 2. Fix 'is_holiday' (Needs 'locale' columns first)
-        # We add these because features.py might look for them to build 'is_holiday'
-        for col in ['locale', 'locale_name', 'description', 'transferred']:
-            if col not in df.columns:
-                df[col] = 'Normal'
-        
-        # 3. Explicitly create 'is_holiday' if it's missing
-        if 'is_holiday' not in df.columns:
-             df['is_holiday'] = 0  # Assume no holidays in demo mode
-
-        # 4. Fix other common missing columns
-        if 'transactions' not in df.columns:
-            df['transactions'] = 1500
-        if 'type' not in df.columns:
-            df['type'] = 'D'
-        if 'cluster' not in df.columns:
-            df['cluster'] = 13
-        # --------------------------------------------------
-
-        return df.tail(1000)
+        return df_filtered.tail(2000)
         
     else:
-        st.error("❌ No data found! Please upload 'demo_data.csv' to GitHub.")
+        st.error(f"❌ Could not find {zip_path}. Please upload 'train.zip' and helper CSVs to 'data/raw/'.")
         st.stop()
+
+# --- MAIN APP LOGIC ---
 model, scaler = load_resources()
 df = load_data()
 
 if model is None: st.stop()
 
 # --- HEADER ---
-st.title("🤖 AI Dynamic Pricing Engine")
+st.title("🛒 AI Dynamic Pricing Engine")
 st.markdown("### Store Sales Forecasting & Promotion Optimization")
 
 # --- SIDEBAR & WEATHER ---
@@ -143,7 +155,9 @@ with tab2:
             pre.scaler = scaler
             
             recent = df_feat.tail(30).copy()
+            # Ensure we only use columns the scaler expects
             cols = ["sales"] + [c for c in recent.columns if c not in ["sales", "date"]]
+            # Safety check: align columns
             recent = recent[cols]
             
             scaled_window = scaler.transform(recent)
@@ -151,7 +165,9 @@ with tab2:
             
             # Scenario 1: No Promo
             seq_no = input_seq.copy()
-            seq_no[0, -1, 2] = 0
+            # Assuming 'onpromotion' is index 2 (Verify this based on your training!)
+            # If your training data had sales(0), dcoil(1), onpromo(2)... then index 2 is correct.
+            seq_no[0, -1, 2] = 0 
             pred_no_raw = model.predict(seq_no, verbose=0)
             
             # Scenario 2: Promo
