@@ -41,7 +41,7 @@ def load_data():
         raw = loader.load_raw_data()
         df = loader.merge_data(raw)
         
-        # Filter
+        # Filter for Store 1, Grocery I
         df = df[
             (df["store_nbr"] == 1) &
             (df["family"] == "GROCERY I")
@@ -51,9 +51,35 @@ def load_data():
     
     # 2. Fallback to Demo Data (GitHub/Cloud)
     elif os.path.exists("demo_data.csv"):
-        print("⚠️ Big data not found. Using Demo Data.")
+        # print("⚠️ Big data not found. Using Demo Data.")
         df = pd.read_csv("demo_data.csv")
-        df['date'] = pd.to_datetime(df['date']) # Ensure date format
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # --- REPAIR: Add Missing Columns for Cloud Demo ---
+        
+        # 1. Fix 'dcoilwtico' (Oil Price)
+        if 'dcoilwtico' not in df.columns:
+            df['dcoilwtico'] = 50.0  # Set a default average price
+
+        # 2. Fix 'is_holiday' (Needs 'locale' columns first)
+        # We add these because features.py might look for them to build 'is_holiday'
+        for col in ['locale', 'locale_name', 'description', 'transferred']:
+            if col not in df.columns:
+                df[col] = 'Normal'
+        
+        # 3. Explicitly create 'is_holiday' if it's missing
+        if 'is_holiday' not in df.columns:
+             df['is_holiday'] = 0  # Assume no holidays in demo mode
+
+        # 4. Fix other common missing columns
+        if 'transactions' not in df.columns:
+            df['transactions'] = 1500
+        if 'type' not in df.columns:
+            df['type'] = 'D'
+        if 'cluster' not in df.columns:
+            df['cluster'] = 13
+        # --------------------------------------------------
+
         return df.tail(1000)
         
     else:
