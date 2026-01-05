@@ -4,16 +4,35 @@ import numpy as np
 class FeatureEngineer:
     def __init__(self):
         pass
-
-    def create_features(self, df):
-        """
-        Extracts time-based and business-relevant features.
-        """
-        print("Engineering features...")
-
-        # Always work on a copy (prevents SettingWithCopyWarning)
+def create_features(self, df):
         df = df.copy()
+        
+        # Ensure 'date' is datetime
+        if 'date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['date']):
+             df['date'] = pd.to_datetime(df['date'])
 
+        # Define the columns we expect the model to need
+        cols_to_keep = [
+            'onpromotion',
+            'dcoilwtico',
+            'is_holiday',
+            'transactions',
+            'is_weekend',
+            'is_payday'
+        ]
+
+        # --- SAFETY PATCH: Create missing columns with 0 instead of crashing ---
+        for col in cols_to_keep:
+            if col not in df.columns:
+                print(f" Warning: '{col}' missing in features.py. Filling with 0.")
+                df[col] = 0
+        # -----------------------------------------------------------------------
+
+        # Now it is safe to select them because we guaranteed they exist above
+        df_featured = df[cols_to_keep].copy()
+        
+        print(f"Features created. Columns: {df_featured.columns.tolist()}")
+        return df_featured
         # Ensure datetime
         df['date'] = pd.to_datetime(df['date'])
 
