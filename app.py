@@ -48,7 +48,7 @@ def load_data():
         
         # 1. READ DIRECTLY FROM ZIP (Pandas can do this!)
         raw = pd.read_csv(zip_path, compression='zip')
-        
+        raw.rename(columns={"unit_sales": "sales"}, inplace=True)
         # 2. LOAD REAL HELPER FILES
         try:
             oil = pd.read_csv(oil_path)
@@ -156,16 +156,24 @@ with tab2:
             
             recent = df_feat.tail(30).copy()
             # Ensure we only use columns the scaler expects
-            cols = ["sales"] + [c for c in recent.columns if c not in ["sales", "date"]]
+            ##cols = ["sales"] + [c for c in recent.columns if c not in ["sales", "date"]]
             # Safety check: align columns
-            recent = recent[cols]
-            
+            ##recent = recent[cols]
+            recent = df_feat.tail(30).copy()
+
+# Final safety check (should never fail now)
+    if "sales" not in recent.columns:
+            st.error("❌ 'sales' missing after feature engineering. Check load_data().")
+            st.stop()
+
             scaled_window = scaler.transform(recent)
             input_seq = scaled_window.reshape(1, 30, -1)
+
             
+                
             # Scenario 1: No Promo
             seq_no = input_seq.copy()
-            # Assuming 'onpromotion' is index 2 (Verify this based on your training!)
+             # Assuming 'onpromotion' is index 2 (Verify this based on your training!)
             # If your training data had sales(0), dcoil(1), onpromo(2)... then index 2 is correct.
             seq_no[0, -1, 2] = 0 
             pred_no_raw = model.predict(seq_no, verbose=0)
