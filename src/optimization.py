@@ -21,9 +21,9 @@ class PromotionOptimizer:
         input_seq = current_seq.reshape(1, self.look_back, -1)
         
         # --- SCENARIO 1: NO PROMOTION ---
-        # "onpromotion" is the column at index 2 (based on your features list)
-        # Let's verify columns: ['sales', 'onpromotion', 'dcoilwtico', 'is_holiday'...]
-        PROMO_IDX = 2 
+        # Column order from features: ['sales', 'onpromotion', 'dcoilwtico', 'is_holiday', 'transactions', 'is_weekend', 'is_payday']
+        # onpromotion is index 1
+        PROMO_IDX = 1 
         
         seq_no_promo = input_seq.copy()
         # Set the most recent day's promo status to 0 (No Promo)

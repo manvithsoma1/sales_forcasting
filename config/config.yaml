@@ -13,4 +13,4 @@ model:
   type: "LSTM"
   look_back_days: 30   # Use past 30 days to predict next day
   batch_size: 32
-  epochs: 20
+  epochs: 50           # Early stopping will stop earlier if no improvement

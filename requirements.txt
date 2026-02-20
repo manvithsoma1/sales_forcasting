@@ -1,11 +1,17 @@
+# Protobuf MUST be 3.20.x for Streamlit (constraints.txt enforces it)
+-c constraints.txt
+protobuf==3.20.3
+# Grpcio 1.59+ pulls protobuf 4+, pin older
+grpcio>=1.48,<1.59
+# TensorFlow 2.15 works with protobuf 3.20
+tensorflow==2.15.0
+streamlit
 pandas
 numpy
 scikit-learn
-tensorflow
 pyyaml
 matplotlib
 seaborn
 joblib
-streamlit
 requests
-plotly 
+plotly

@@ -1,10 +1,13 @@
 import requests
 
-def get_current_weather(api_key="7f8ffc7f3a4e580bb947dc11bc4f6eb9"):
+def get_current_weather(api_key=""):
     """
     Fetches real-time weather for Quito, Ecuador.
-    Returns: dictionary with 'main' (Rain/Clear) and 'temp' (Celsius).
+    Returns: dictionary with 'condition', 'description', 'temp'.
+    Requires valid OpenWeatherMap API key (get one at openweathermap.org).
     """
+    if not api_key or not api_key.strip():
+        return {"condition": "Unknown", "description": "No API key", "temp": 20}
     # Coordinates for Quito, Ecuador (Store 1 location)
     LAT = "-0.1807"
     LON = "-78.4678"

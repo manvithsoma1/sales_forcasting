@@ -40,8 +40,15 @@ def main():
     input_shape = (X.shape[1], X.shape[2]) 
     lstm = LSTMModel(input_shape=input_shape)
     
-    # Using 5 epochs for speed
-    history = lstm.train(X, y, epochs=5) 
+    history = lstm.train(X, y)  # Uses config epochs + early stopping
+    
+    # 4b. Evaluate
+    evaluator = Evaluator()
+    evaluator.plot_loss(history)
+    y_pred = lstm.model.predict(X, verbose=0).flatten()
+    evaluator.calculate_metrics(y, y_pred)
+    evaluator.plot_predictions(y, y_pred, start_idx=0, length=min(100, len(y)))
+    
     lstm.save_model('models/lstm_grocery_v1.h5')
     
     # --- 5. OPTIMIZATION SIMULATION (The Missing Piece) ---

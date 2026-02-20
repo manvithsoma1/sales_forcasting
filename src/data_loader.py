@@ -15,14 +15,26 @@ class DataLoader:
         """Loads all raw CSVs into a dictionary of DataFrames."""
         print("Loading raw data...")
         data = {}
-        # Load Train
-        data['train'] = pd.read_csv(os.path.join(self.raw_path, self.files['train']))
+        # Load Train (support .csv or .zip)
+        train_path = os.path.join(self.raw_path, self.files['train'])
+        zip_path = os.path.join(self.raw_path, 'train.zip')
+        if os.path.exists(train_path):
+            data['train'] = pd.read_csv(train_path)
+        elif os.path.exists(zip_path):
+            data['train'] = pd.read_csv(zip_path, compression='zip')
+        else:
+            raise FileNotFoundError(f"Train data not found at {train_path} or {zip_path}")
+        if 'unit_sales' in data['train'].columns and 'sales' not in data['train'].columns:
+            data['train'].rename(columns={'unit_sales': 'sales'}, inplace=True)
         # Load Stores
         data['stores'] = pd.read_csv(os.path.join(self.raw_path, self.files['stores']))
         # Load Oil
         data['oil'] = pd.read_csv(os.path.join(self.raw_path, self.files['oil']))
         # Load Holidays
         data['holidays'] = pd.read_csv(os.path.join(self.raw_path, self.files['holidays']))
+        # Load Transactions (store-level daily transaction count)
+        if 'transactions' in self.files and os.path.exists(os.path.join(self.raw_path, self.files['transactions'])):
+            data['transactions'] = pd.read_csv(os.path.join(self.raw_path, self.files['transactions']))
         
         print("Raw data loaded successfully.")
         return data  
@@ -64,6 +76,13 @@ class DataLoader:
         
         # Fill NaN for is_holiday with 0
         df_merged['is_holiday'] = df_merged['is_holiday'].fillna(0)
+        
+        # 4. Merge Transactions (daily store transaction count - demand signal)
+        if 'transactions' in data:
+            trans = data['transactions'].copy()
+            trans['date'] = pd.to_datetime(trans['date'])
+            df_merged = df_merged.merge(trans[['date', 'store_nbr', 'transactions']], on=['date', 'store_nbr'], how='left')
+            df_merged['transactions'] = df_merged['transactions'].fillna(0)
         
         print(f"Data Merged. Shape: {df_merged.shape}")
         return df_merged

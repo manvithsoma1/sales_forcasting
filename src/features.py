@@ -34,10 +34,10 @@ class FeatureEngineer:
                 df[col] = default
 
         # -----------------------------
-        # Time-based features
+        # Time-based features (must match scaler fit-time columns)
         # -----------------------------
-        df['is_weekend'] = np.where(df['date'].dt.dayofweek >= 5, 1, 0)
-
+        df['day_of_week'] = df['date'].dt.dayofweek
+        df['month'] = df['date'].dt.month
         df['is_payday'] = np.where(
             (df['date'].dt.day == 15) | (df['date'].dt.is_month_end),
             1,
@@ -45,16 +45,16 @@ class FeatureEngineer:
         )
 
         # -----------------------------
-        # FINAL MODEL FEATURES
-        # sales MUST be index 0
+        # FINAL MODEL FEATURES (order must match trained scaler)
+        # sales MUST be index 0, onpromotion index 1
         # -----------------------------
         cols_to_keep = [
             'sales',        # index 0 (target)
             'onpromotion',
             'dcoilwtico',
             'is_holiday',
-            'transactions',
-            'is_weekend',
+            'day_of_week',
+            'month',
             'is_payday'
         ]
 

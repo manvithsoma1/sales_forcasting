@@ -1,7 +1,8 @@
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import yaml
 import os
 
@@ -15,48 +16,69 @@ class LSTMModel:
 
     def _build_model(self):
         """
-        Constructs the LSTM Architecture.
+        Constructs an improved LSTM architecture for sales forecasting.
+        Uses deeper stacked LSTMs with BatchNorm for stability.
         """
         print(f"Building LSTM Model with input shape: {self.input_shape}...")
         
         model = Sequential()
         
-        # Layer 1: LSTM with Return Sequences (pass data to next LSTM layer)
-        model.add(LSTM(64, return_sequences=True, input_shape=self.input_shape))
-        model.add(Dropout(0.2)) # Prevent Overfitting
+        # Layer 1: LSTM
+        model.add(LSTM(128, return_sequences=True, input_shape=self.input_shape))
+        model.add(Dropout(0.3))
+        model.add(BatchNormalization())
         
-        # Layer 2: Standard LSTM
+        # Layer 2: LSTM
+        model.add(LSTM(64, return_sequences=True))
+        model.add(Dropout(0.3))
+        model.add(BatchNormalization())
+        
+        # Layer 3: Final LSTM
         model.add(LSTM(32, return_sequences=False))
         model.add(Dropout(0.2))
         
-        # Output Layer: Predicts 1 value (Sales)
+        # Output Layer
+        model.add(Dense(16, activation='relu'))
+        model.add(Dropout(0.1))
         model.add(Dense(1))
         
-        # Compile
-# OLD
-        # model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
-        
-        # NEW (Add clipnorm)
         model.compile(
             optimizer=Adam(learning_rate=0.001, clipnorm=1.0), 
-            loss='mse'
+            loss='mse',
+            metrics=['mae']
         )        
         return model
 
     def train(self, X_train, y_train, epochs=None, batch_size=None):
         """
-        Trains the model.
+        Trains the model with early stopping and learning rate reduction.
         """
-        # Use config values if arguments not provided
         e = epochs if epochs else self.config['model']['epochs']
         b = batch_size if batch_size else self.config['model']['batch_size']
         
-        print(f"Starting training for {e} epochs...")
+        callbacks = [
+            EarlyStopping(
+                monitor='val_loss',
+                patience=8,
+                restore_best_weights=True,
+                verbose=1
+            ),
+            ReduceLROnPlateau(
+                monitor='val_loss',
+                factor=0.5,
+                patience=4,
+                min_lr=1e-6,
+                verbose=1
+            )
+        ]
+        
+        print(f"Starting training for up to {e} epochs (early stopping enabled)...")
         history = self.model.fit(
             X_train, y_train,
             epochs=e,
             batch_size=b,
-            validation_split=0.1, # Use 10% of data to check accuracy during training
+            validation_split=0.15,
+            callbacks=callbacks,
             verbose=1
         )
         return history
