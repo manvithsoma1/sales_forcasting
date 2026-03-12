@@ -1,6 +1,11 @@
 """
-Model Module — v2.0
+Model Module — v2.1
 AttentionLSTM, LightGBM per-family, optional TFT, Ridge Ensemble, and ModelRegistry.
+
+v2.1 adds cross-version Keras compatibility:
+  - batch_shape → shape patch for TF 2.16+ deserialization
+  - robust_load_keras_model() with 3-try fallback strategy
+  - rebuild_and_save() to migrate .h5 models to .keras format
 """
 
 import os
@@ -18,7 +23,7 @@ from tensorflow.keras.models import Model as KerasModel
 from tensorflow.keras.layers import (
     Input, LSTM, Bidirectional, Dense, Dropout,
     BatchNormalization, Layer, Permute, Multiply, Flatten,
-    RepeatVector, Lambda
+    RepeatVector, Lambda, InputLayer
 )
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
@@ -32,6 +37,152 @@ import lightgbm as lgb
 # Ensemble
 # ======================================================================
 from sklearn.linear_model import Ridge
+
+
+# ======================================================================
+# KERAS CROSS-VERSION COMPATIBILITY PATCH
+# ======================================================================
+# TF ≤ 2.15 saved InputLayer configs with key "batch_shape".
+# TF 2.16+ renamed it to "shape", causing deserialization errors.
+# This patch transparently handles both old and new configs.
+
+class _PatchedInputLayer(InputLayer):
+    """InputLayer subclass that accepts both 'batch_shape' and 'shape'."""
+
+    @classmethod
+    def from_config(cls, config):
+        # Rename legacy key → current key so TF 2.16+ accepts old models
+        if "batch_shape" in config and "shape" not in config:
+            config = dict(config)
+            config["shape"] = config.pop("batch_shape")[1:]  # strip batch dim
+        return super().from_config(config)
+
+
+# Register the patch globally so any load_model call benefits from it
+_COMPAT_CUSTOM_OBJECTS = {
+    "InputLayer": _PatchedInputLayer,
+    "AttentionLayer": None,        # filled in after AttentionLayer is defined
+}
+
+
+# ======================================================================
+# ROBUST MODEL LOADER
+# ======================================================================
+
+def robust_load_keras_model(path, extra_custom_objects=None):
+    """
+    Load a Keras model using a 3-try compatibility fallback strategy:
+
+    Try 1 — Normal load (fast path, works when TF version matches).
+    Try 2 — Load with patched InputLayer custom object (fixes batch_shape error).
+    Try 3 — Architecture rebuild + load weights only (last resort).
+
+    Parameters
+    ----------
+    path : str
+        Path to .h5 or .keras model file.
+    extra_custom_objects : dict, optional
+        Additional custom objects (e.g. {'AttentionLayer': AttentionLayer}).
+
+    Returns
+    -------
+    tf.keras.Model
+    """
+    custom_objects = {"AttentionLayer": AttentionLayer}
+    if extra_custom_objects:
+        custom_objects.update(extra_custom_objects)
+
+    # ── Try 1: normal load ──────────────────────────────────────────────
+    try:
+        model = tf.keras.models.load_model(path, custom_objects=custom_objects, compile=False)
+        print(f"✅ Model loaded (Try 1 — native): {path}")
+        return model
+    except Exception as e1:
+        print(f"⚠️  Try 1 failed: {e1}")
+
+    # ── Try 2: patched InputLayer ────────────────────────────────────────
+    try:
+        patched_objects = dict(custom_objects)
+        patched_objects["InputLayer"] = _PatchedInputLayer
+        model = tf.keras.models.load_model(path, custom_objects=patched_objects, compile=False)
+        print(f"✅ Model loaded (Try 2 — patched InputLayer): {path}")
+        return model
+    except Exception as e2:
+        print(f"⚠️  Try 2 failed: {e2}")
+
+    # ── Try 3: rebuild architecture + load weights ───────────────────────
+    try:
+        print("🔄 Try 3: rebuilding architecture and loading weights…")
+        # Infer input shape from H5 file metadata
+        import h5py
+        with h5py.File(path, "r") as f:
+            # Try to read batch_input_shape from the first layer config
+            model_config = f.attrs.get("model_config", None)
+            input_shape = (30, 7)  # sensible default for this project
+            if model_config is not None:
+                import ast
+                try:
+                    cfg_str = model_config
+                    if isinstance(cfg_str, bytes):
+                        cfg_str = cfg_str.decode("utf-8")
+                    cfg = json.loads(cfg_str)
+                    layers = cfg.get("config", {}).get("layers", [])
+                    if layers:
+                        first_cfg = layers[0].get("config", {})
+                        bs = first_cfg.get("batch_shape") or first_cfg.get("batch_input_shape")
+                        if bs and len(bs) >= 3:
+                            input_shape = (bs[1], bs[2])
+                except Exception:
+                    pass
+
+        # Rebuild with same architecture used in AttentionLSTMModel
+        dummy = AttentionLSTMModel.__new__(AttentionLSTMModel)
+        dummy.units = [128, 64]
+        dummy.dropout = 0.3
+        dummy.use_attention = True
+        dummy.use_bidirectional = True
+        dummy.lr = 0.001
+        dummy.loss = "huber"
+        dummy.input_shape = input_shape
+        rebuilt = dummy._build_model()
+        rebuilt.load_weights(path, by_name=False, skip_mismatch=True)
+        print(f"✅ Model loaded (Try 3 — rebuilt + weights): {path}")
+        return rebuilt
+    except Exception as e3:
+        print(f"❌ Try 3 failed: {e3}")
+
+    raise RuntimeError(
+        f"Could not load Keras model from '{path}' after 3 attempts.\n"
+        "Run  python src/model_migration.py  to migrate your models to .keras format."
+    )
+
+
+def rebuild_and_save(old_path, new_path=None):
+    """
+    Load an old .h5 model with the compatibility patch and re-save it in
+    the modern .keras format (or back to .h5 with updated config).
+
+    Parameters
+    ----------
+    old_path : str
+        Path to the existing .h5 / .keras model file.
+    new_path : str, optional
+        Destination path.  Defaults to same directory, .keras extension.
+
+    Returns
+    -------
+    str  — path where the migrated model was saved.
+    """
+    if new_path is None:
+        base = os.path.splitext(old_path)[0]
+        new_path = base + ".keras"
+
+    print(f"🔄 Migrating: {old_path}  →  {new_path}")
+    model = robust_load_keras_model(old_path)
+    os.makedirs(os.path.dirname(new_path) if os.path.dirname(new_path) else ".", exist_ok=True)
+    model.save(new_path)
+    print(f"✅ Migrated model saved to: {new_path}")
+    return new_path
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -64,6 +215,10 @@ class AttentionLayer(Layer):
 
     def get_config(self):
         return super().get_config()
+
+
+# Back-fill the AttentionLayer reference in the compat objects dict
+_COMPAT_CUSTOM_OBJECTS["AttentionLayer"] = AttentionLayer
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -150,15 +305,21 @@ class AttentionLSTMModel:
         return self.model.predict(X, verbose=0).flatten()
 
     def save(self, path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.model.save(path)
-        print(f"LSTM model saved to {path}")
+        """Save in .keras format (preferred) — falls back to .h5 if path ends with .h5."""
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+        # Prefer .keras for forward compatibility
+        if path.endswith('.h5'):
+            keras_path = path.replace('.h5', '.keras')
+            self.model.save(keras_path)
+            print(f"LSTM model saved (new .keras format) to {keras_path}")
+        else:
+            self.model.save(path)
+            print(f"LSTM model saved to {path}")
 
     def load(self, path):
-        self.model = tf.keras.models.load_model(
-            path, custom_objects={'AttentionLayer': AttentionLayer}
-        )
-        print(f"LSTM model loaded from {path}")
+        """Load using the robust 3-try compatibility loader."""
+        self.model = robust_load_keras_model(path)
+        print(f"LSTM model ready (loaded from {path})")
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -309,7 +470,7 @@ class EnsembleModel:
         return self.meta_model.predict(X_meta)
 
     def save(self, path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
         joblib.dump({
             'meta_model': self.meta_model,
             'model_names': self.model_names,
@@ -370,7 +531,8 @@ class ModelRegistry:
         for name, model in models.items():
             if hasattr(model, 'save'):
                 if isinstance(model, AttentionLSTMModel):
-                    model.save(os.path.join(version_path, f'{name}.h5'))
+                    # Save in .keras format for forward compatibility
+                    model.save(os.path.join(version_path, f'{name}.keras'))
                 elif isinstance(model, LightGBMModel):
                     model.save(os.path.join(version_path, name))
                 elif isinstance(model, EnsembleModel):
@@ -382,7 +544,8 @@ class ModelRegistry:
             'timestamp': datetime.now().isoformat(),
             'metrics': metrics,
             'model_names': list(models.keys()),
-            'feature_columns': feature_cols or []
+            'feature_columns': feature_cols or [],
+            'keras_format': '.keras',   # flag for loader to prefer .keras
         }
         with open(os.path.join(version_path, 'metadata.json'), 'w') as f:
             json.dump(metadata, f, indent=2)

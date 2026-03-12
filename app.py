@@ -271,36 +271,58 @@ def engineer_features(_df, _holidays_raw):
 
 @st.cache_resource
 def load_model_artifacts():
-    """Load trained model and scaler."""
-    model, scaler = None, None
-    try:
-        from tensorflow.keras.models import load_model as keras_load
-        from src.model import AttentionLayer
+    """Load trained model and scaler using the cross-version compatible robust loader."""
+    from src.model import robust_load_keras_model
 
-        # Try v2 model first
-        model_path = None
-        base = 'models'
-        # Find latest version directory
-        versions = [d for d in os.listdir(base) if d.startswith('v') and d[1:].isdigit()] if os.path.exists(base) else []
+    model, scaler = None, None
+    model_path = None
+    base = 'models'
+
+    try:
+        # ── Discover model file (prefer .keras, fall back to .h5) ──────
+        versions = (
+            [d for d in os.listdir(base) if d.startswith('v') and d[1:].isdigit()]
+            if os.path.exists(base) else []
+        )
         if versions:
             latest = sorted(versions, key=lambda x: int(x[1:]))[-1]
             v_path = os.path.join(base, latest)
-            for f in os.listdir(v_path):
-                if f.endswith('.h5'):
-                    model_path = os.path.join(v_path, f)
+            for ext in ('.keras', '.h5'):          # prefer new format
+                for fname in os.listdir(v_path):
+                    if fname.endswith(ext):
+                        model_path = os.path.join(v_path, fname)
+                        break
+                if model_path:
                     break
 
-        # Fall back to v1 model
-        if model_path is None and os.path.exists('models/lstm_grocery_v1.h5'):
-            model_path = 'models/lstm_grocery_v1.h5'
+        # Fall back to legacy v1 files
+        if model_path is None:
+            for candidate in ('models/lstm_grocery_v1.keras', 'models/lstm_grocery_v1.h5'):
+                if os.path.exists(candidate):
+                    model_path = candidate
+                    break
 
+        # ── Load with robust 3-try strategy ───────────────────────────
         if model_path:
-            model = keras_load(model_path, compile=False, custom_objects={'AttentionLayer': AttentionLayer})
+            try:
+                model = robust_load_keras_model(model_path)
+            except RuntimeError as load_err:
+                st.warning(
+                    f"⚠️ Model could not be loaded: {load_err}\n\n"
+                    "**Fix:** Click the **🔄 Rebuild & Save Model** button in the sidebar, "
+                    "or run `python src/model_migration.py` from the terminal."
+                )
 
         if os.path.exists('models/scaler.pkl'):
             scaler = joblib.load('models/scaler.pkl')
+
     except Exception as e:
-        st.warning(f"⚠️ Model loading: {e}")
+        st.warning(
+            f"⚠️ Model loading failed: {e}\n\n"
+            "Run `python src/model_migration.py` to migrate your models, "
+            "or click **🔄 Rebuild & Save Model** in the sidebar."
+        )
+
     return model, scaler
 
 @st.cache_resource
@@ -363,6 +385,30 @@ with st.sidebar:
     st.divider()
     model_choice = st.radio("🧠 Model", ['Ensemble', 'LightGBM', 'LSTM'], index=0,
                             help="Select model for predictions")
+
+    # ── Rebuild & Save Model button ───────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔄 Rebuild & Save Model",
+                 help="Re-saves the model in the new .keras format to fix batch_shape errors",
+                 use_container_width=True):
+        with st.spinner("Migrating model to .keras format…"):
+            try:
+                from src.model import rebuild_and_save
+                import glob
+                h5_files = glob.glob('models/**/*.h5', recursive=True) + \
+                           glob.glob('models/*.h5')
+                if h5_files:
+                    for h5 in h5_files:
+                        rebuild_and_save(h5)
+                    st.success(
+                        f"✅ Migrated {len(h5_files)} model(s) to .keras format. "
+                        "Please refresh the page to reload the model."
+                    )
+                    st.cache_resource.clear()
+                else:
+                    st.info("No .h5 model files found. Nothing to migrate.")
+            except Exception as rb_err:
+                st.error(f"❌ Rebuild failed: {rb_err}")
 
     st.divider()
     st.subheader("☁️ Weather")

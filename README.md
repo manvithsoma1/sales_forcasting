@@ -72,3 +72,48 @@ store-sales-forecasting/
 - **Model:** Deeper LSTM (128→64→32), BatchNorm, early stopping, ReduceLROnPlateau
 - **UI:** Clean layout, tooltips, clearer tabs, modern chart styling
 - **Security:** API key input only (no hardcoded keys)
+
+---
+
+## Troubleshooting
+
+### ❌ `Unrecognized keyword arguments: ['batch_shape']`
+
+**Cause:** Your model was saved with TF ≤ 2.15 where Keras stored `InputLayer` configs with
+the key `batch_shape`. TF 2.16+ renamed this to `shape`, breaking deserialization of old files.
+
+**Fix — Option 1 (recommended): Run the migration script**
+
+```bash
+# From the project root
+python src/model_migration.py
+```
+
+This scans `models/` for all `.h5` files, loads each with the compatibility patch,
+and re-saves them as `.keras` files. Future loads will work on any TF version.
+
+```bash
+# Migrate a single file
+python src/model_migration.py --file models/lstm_grocery_v1.h5
+
+# Re-migrate even if .keras already exists
+python src/model_migration.py --overwrite
+```
+
+**Fix — Option 2: In-app button**
+
+Open the Streamlit app, look for the **🔄 Rebuild & Save Model** button in the sidebar,
+and click it. It does the same migration without leaving the browser.
+
+**Fix — Option 3: Pin TensorFlow version**
+
+`requirements.txt` already pins `tensorflow==2.15.0` and `keras==2.15.0`.
+If using Streamlit Cloud, also set this environment variable in App Settings → Advanced:
+
+| Variable | Value |
+|---|---|
+| `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION` | `python` |
+
+**Why the app still works even with this error:**
+`load_model_artifacts()` catches the exception, shows a warning banner, and continues running
+without a model — all dashboard charts and optimizers work without the LSTM model loaded.
