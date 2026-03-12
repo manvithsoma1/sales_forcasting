@@ -70,8 +70,12 @@ def migrate_all(models_dir: str = "models", overwrite: bool = False) -> dict:
     -------
     dict  {'success': [...], 'failed': [...], 'skipped': [...]}
     """
-    pattern = os.path.join(models_dir, "**", "*.h5")
-    h5_files = glob.glob(pattern, recursive=True)
+    # Fix: Include both root files and subdirectory files
+    pattern_root = os.path.join(models_dir, "*.h5")
+    pattern_recursive = os.path.join(models_dir, "**", "*.h5")
+    
+    h5_files = glob.glob(pattern_root) + glob.glob(pattern_recursive, recursive=True)
+    h5_files = list(set(h5_files))  # De-duplicate
 
     if not h5_files:
         print(f"ℹ️  No .h5 model files found in '{models_dir}'. Nothing to migrate.")
