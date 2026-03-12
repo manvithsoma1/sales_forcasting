@@ -1,65 +1,61 @@
-import pandas as pd
-import numpy as np
-import joblib
-from src.data_loader import DataLoader
-from src.features import FeatureEngineer
-from src.preprocessing import Preprocessor
-from src.model import LSTMModel
-from src.evaluation import Evaluator
-from src.optimization import PromotionOptimizer  # <--- Make sure this import is here
+"""
+main.py — v2.0
+Multi-model training with ensemble.
+Usage:
+    python main.py                    # Train all models (LightGBM + LSTM + Ensemble)
+    python main.py --model lstm       # Train LSTM only
+    python main.py --model lgbm       # Train LightGBM only
+    python main.py --store 1 --family "GROCERY I"  # Train on specific store/family
+"""
+
+import argparse
+from src.pipeline import Pipeline
+
 
 def main():
-    # 1. Load Data
-    loader = DataLoader()
-    raw_data = loader.load_raw_data()
-    df_merged = loader.merge_data(raw_data)
-    
-    # Filter for Store 1, Grocery I
-    print("\n[INFO] Filtering for Store 1, Product Family 'GROCERY I'...")
-    df_subset = df_merged[
-        (df_merged['store_nbr'] == 1) & 
-        (df_merged['family'] == 'GROCERY I')
-    ].sort_values('date')
-    
-    # 2. Features
-    engineer = FeatureEngineer()
-    df_featured = engineer.create_features(df_subset)
-    
-    # 3. Preprocessing
-    preprocessor = Preprocessor()
-    cols = ['sales'] + [c for c in df_featured.columns if c != 'sales' and c != 'date']
-    df_ordered = df_featured[cols]
-    
-    # Scale & SAVE THE SCALER
-    df_scaled, scaler = preprocessor.scale_data(df_ordered)
-    joblib.dump(scaler, 'models/scaler.pkl') 
-    
-    X, y = preprocessor.create_sequences(df_scaled.values)
-    
-    # 4. Train
-    input_shape = (X.shape[1], X.shape[2]) 
-    lstm = LSTMModel(input_shape=input_shape)
-    
-    history = lstm.train(X, y)  # Uses config epochs + early stopping
-    
-    # 4b. Evaluate
-    evaluator = Evaluator()
-    evaluator.plot_loss(history)
-    y_pred = lstm.model.predict(X, verbose=0).flatten()
-    evaluator.calculate_metrics(y, y_pred)
-    evaluator.plot_predictions(y, y_pred, start_idx=0, length=min(100, len(y)))
-    
-    lstm.save_model('models/lstm_grocery_v1.h5')
-    
-    # --- 5. OPTIMIZATION SIMULATION (The Missing Piece) ---
-    print("\n[INFO] Starting Promotion Optimization Logic...")
-    
-    # Take the VERY LAST 30 days of data to simulate "Tomorrow"
-    recent_data_window = df_scaled.values[-30:] 
-    
-    # Run the optimizer
-    optimizer = PromotionOptimizer(lstm.model, scaler)
-    optimizer.optimize(recent_data_window)
+    parser = argparse.ArgumentParser(description='Store Sales Forecasting — Model Training')
+    parser.add_argument('--model', type=str, default='all',
+                        choices=['all', 'lstm', 'lgbm'],
+                        help='Which model to train')
+    parser.add_argument('--store', type=int, default=None,
+                        help='Filter to specific store number')
+    parser.add_argument('--family', type=str, default=None,
+                        help='Filter to specific product family')
+    parser.add_argument('--config', type=str, default='config/config.yaml',
+                        help='Path to config file')
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("🚀 Store Sales Forecasting — Training Pipeline v2.0")
+    print("=" * 60)
+
+    pipeline = Pipeline(config_path=args.config)
+
+    train_lstm = args.model in ('all', 'lstm')
+    train_lgbm = args.model in ('all', 'lgbm')
+
+    results = pipeline.run(
+        store_nbr=args.store,
+        family=args.family,
+        train_lstm=train_lstm,
+        train_lgbm=train_lgbm,
+    )
+
+    # Summary
+    print("\n" + "=" * 60)
+    print("📊 TRAINING SUMMARY")
+    print("=" * 60)
+    print(f"  Data shape:    {results.get('data_shape', 'N/A')}")
+    print(f"  Feature shape: {results.get('feature_shape', 'N/A')}")
+    print(f"  Model version: v{results.get('version', '?')}")
+    print()
+
+    for model_name, metrics in results.get('metrics', {}).items():
+        print(f"  [{model_name.upper()}]")
+        for k, v in metrics.items():
+            print(f"    {k}: {v:.4f}")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     main()

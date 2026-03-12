@@ -1,17 +1,33 @@
-# Protobuf MUST be 3.20.x for Streamlit (constraints.txt enforces it)
+# Core ML
+tensorflow==2.15.0
+lightgbm>=4.0.0
+scikit-learn>=1.3.0
+shap>=0.43.0
+statsmodels>=0.14.0
+scipy>=1.11.0
+
+# PyTorch + Forecasting (optional — TFT model)
+# torch>=2.0.0
+# pytorch-forecasting>=1.0.0
+# pytorch-lightning>=2.0.0
+
+# Experiment tracking
+mlflow>=2.9.0
+
+# Data & Utils
+pandas>=2.0.0
+numpy>=1.24.0,<2.0.0
+pyyaml>=6.0
+joblib>=1.3.0
+requests>=2.31.0
+
+# Visualization
+streamlit>=1.28.0
+plotly>=5.18.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Streamlit Cloud compatibility
 -c constraints.txt
 protobuf==3.20.3
-# Grpcio 1.59+ pulls protobuf 4+, pin older
 grpcio>=1.48,<1.59
-# TensorFlow 2.15 works with protobuf 3.20
-tensorflow==2.15.0
-streamlit
-pandas
-numpy
-scikit-learn
-pyyaml
-matplotlib
-seaborn
-joblib
-requests
-plotly

@@ -9,8 +9,63 @@ data:
     holidays: "holidays_events.csv"
     transactions: "transactions.csv"
 
+features:
+  lag_days: [1, 7, 14, 21, 28]
+  rolling_windows: [7, 14, 30]
+  # Feature groups for different models
+  static_features: ["store_nbr", "family", "city", "cluster", "state", "type"]
+  known_futures: ["onpromotion", "is_holiday", "is_payday", "is_national_holiday", "is_regional_holiday"]
+  observed_past: ["dcoilwtico", "transactions", "oil_price_7d_ma", "oil_price_30d_ma"]
+
 model:
-  type: "LSTM"
-  look_back_days: 30   # Use past 30 days to predict next day
+  look_back_days: 30
   batch_size: 32
-  epochs: 50           # Early stopping will stop earlier if no improvement
+  epochs: 50
+  validation_split: 0.15
+
+  lstm:
+    units: [128, 64]
+    dropout: 0.3
+    attention: true
+    bidirectional: true
+    loss: "huber"
+    learning_rate: 0.001
+
+  lightgbm:
+    n_estimators: 1000
+    learning_rate: 0.05
+    max_depth: 8
+    num_leaves: 63
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    early_stopping_rounds: 50
+    categorical_features: ["store_nbr", "family", "city", "cluster", "state", "type"]
+
+  tft:
+    enabled: false  # Set true if pytorch-forecasting is installed
+    hidden_size: 64
+    attention_head_size: 4
+    dropout: 0.1
+    learning_rate: 0.001
+    max_epochs: 30
+    quantiles: [0.1, 0.5, 0.9]
+
+  ensemble:
+    method: "ridge"  # ridge | simple_average
+    cv_folds: 5
+
+  registry:
+    base_path: "models"
+    experiment_name: "store-sales-forecasting"
+
+anomaly_detection:
+  contamination: 0.05
+  threshold_std: 2.5
+
+optimization:
+  base_price: 10
+  promo_discount: 0.20
+  cost_per_unit: 6
+  monte_carlo_samples: 1000
+  elasticity_default: -1.5

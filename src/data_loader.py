@@ -1,21 +1,31 @@
+"""
+Data Loader Module — v2.0
+Loads and merges Corporación Favorita datasets with multi-store/family support.
+"""
+
 import pandas as pd
 import os
-import yaml # Reads config.yaml
+import yaml
+
 
 class DataLoader:
-    def __init__(self, config_path='config/config.yaml'): #Runs automatically when the class is created
+    def __init__(self, config_path='config/config.yaml'):
         with open(config_path, 'r') as file:
             self.config = yaml.safe_load(file)
-        
+
         self.raw_path = self.config['data']['raw_path']
         self.files = self.config['data']['files']
-    
-    
+
+    # ------------------------------------------------------------------
+    # Load raw CSV files
+    # ------------------------------------------------------------------
+
     def load_raw_data(self):
         """Loads all raw CSVs into a dictionary of DataFrames."""
         print("Loading raw data...")
         data = {}
-        # Load Train (support .csv or .zip)
+
+        # Train (support .csv or .zip)
         train_path = os.path.join(self.raw_path, self.files['train'])
         zip_path = os.path.join(self.raw_path, 'train.zip')
         if os.path.exists(train_path):
@@ -24,72 +34,100 @@ class DataLoader:
             data['train'] = pd.read_csv(zip_path, compression='zip')
         else:
             raise FileNotFoundError(f"Train data not found at {train_path} or {zip_path}")
+
         if 'unit_sales' in data['train'].columns and 'sales' not in data['train'].columns:
             data['train'].rename(columns={'unit_sales': 'sales'}, inplace=True)
-        # Load Stores
+
+        # Helper files
         data['stores'] = pd.read_csv(os.path.join(self.raw_path, self.files['stores']))
-        # Load Oil
         data['oil'] = pd.read_csv(os.path.join(self.raw_path, self.files['oil']))
-        # Load Holidays
         data['holidays'] = pd.read_csv(os.path.join(self.raw_path, self.files['holidays']))
-        # Load Transactions (store-level daily transaction count)
-        if 'transactions' in self.files and os.path.exists(os.path.join(self.raw_path, self.files['transactions'])):
-            data['transactions'] = pd.read_csv(os.path.join(self.raw_path, self.files['transactions']))
-        
+
+        if 'transactions' in self.files:
+            trans_path = os.path.join(self.raw_path, self.files['transactions'])
+            if os.path.exists(trans_path):
+                data['transactions'] = pd.read_csv(trans_path)
+
         print("Raw data loaded successfully.")
-        return data  
+        return data
+
+    # ------------------------------------------------------------------
+    # Merge datasets
+    # ------------------------------------------------------------------
+
     def merge_data(self, data):
         """
-        Merges the disparate datasets (Oil, Stores, Holidays) into the main Train set.
+        Merges Oil, Stores, Holidays, Transactions into Train set.
+        Returns full merged DataFrame (all stores/families).
         """
         print("Merging data...")
-        df_train = data['train']
-        
-        # 1. Merge with Stores (adds city, state, type, cluster)
-        df_merged = df_train.merge(data['stores'], on='store_nbr', how='left')
-        
-        # 2. Merge with Oil (Economic Indicator)
-        # Note: Oil data has dates, so we merge on date.
-        data['oil']['date'] = pd.to_datetime(data['oil']['date'])
-        df_merged['date'] = pd.to_datetime(df_merged['date'])
-        
-        # Forward fill missing oil values (if oil price is missing for weekends, use Friday's price)
-        # We do this before merging for cleaner data
-        oil_df = data['oil'].sort_values('date').set_index('date').resample('D').ffill().reset_index()
-        
-        df_merged = df_merged.merge(oil_df, on='date', how='left')
-        
-        # 3. Simple Holiday Merge (Binary Flag for now)
-        # We just want to know "Is this date a holiday?"
-# New code (adds .copy())
-        holidays = data['holidays'][['date', 'type', 'transferred']].copy()
+        df = data['train'].copy()
+        df['date'] = pd.to_datetime(df['date'])
+
+        # 1. Stores — adds city, state, type, cluster
+        df = df.merge(data['stores'], on='store_nbr', how='left')
+
+        # 2. Oil — economic indicator (forward-filled for weekends)
+        oil = data['oil'].copy()
+        oil['date'] = pd.to_datetime(oil['date'])
+        oil = oil.sort_values('date').set_index('date').resample('D').ffill().reset_index()
+        df = df.merge(oil, on='date', how='left')
+
+        # 3. Holidays — preserve locale for national/regional distinction
+        holidays = data['holidays'].copy()
         holidays['date'] = pd.to_datetime(holidays['date'])
-        
-        # Filter out transferred holidays (they aren't holidays on that day)
-        holidays = holidays[holidays['transferred'] == False]
-        
-        # Create a simpler 'is_holiday' column
-        holidays['is_holiday'] = 1
-        holidays = holidays[['date', 'is_holiday']].drop_duplicates(subset='date')
-        
-        df_merged = df_merged.merge(holidays, on='date', how='left')
-        
-        # Fill NaN for is_holiday with 0
-        df_merged['is_holiday'] = df_merged['is_holiday'].fillna(0)
-        
-        # 4. Merge Transactions (daily store transaction count - demand signal)
+        holidays_filtered = holidays[holidays['transferred'] == False].copy()
+        holiday_flag = holidays_filtered[['date']].drop_duplicates()
+        holiday_flag['is_holiday'] = 1
+        df = df.merge(holiday_flag, on='date', how='left')
+        df['is_holiday'] = df['is_holiday'].fillna(0).astype(int)
+
+        # 4. Transactions
         if 'transactions' in data:
             trans = data['transactions'].copy()
             trans['date'] = pd.to_datetime(trans['date'])
-            df_merged = df_merged.merge(trans[['date', 'store_nbr', 'transactions']], on=['date', 'store_nbr'], how='left')
-            df_merged['transactions'] = df_merged['transactions'].fillna(0)
-        
-        print(f"Data Merged. Shape: {df_merged.shape}")
-        return df_merged
+            df = df.merge(
+                trans[['date', 'store_nbr', 'transactions']],
+                on=['date', 'store_nbr'], how='left'
+            )
+            df['transactions'] = df['transactions'].fillna(0)
+
+        # Fill remaining NaNs
+        df['dcoilwtico'] = df['dcoilwtico'].ffill().bfill().fillna(0)
+        df['onpromotion'] = df['onpromotion'].fillna(0).astype(int)
+
+        print(f"Data merged. Shape: {df.shape}")
+        return df
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def get_holidays_raw(self):
+        """Returns raw holidays DataFrame for detailed feature engineering."""
+        path = os.path.join(self.raw_path, self.files['holidays'])
+        return pd.read_csv(path)
+
+    def get_store_families(self, df):
+        """Returns unique store numbers and product families for dashboard selectors."""
+        stores = sorted(df['store_nbr'].unique().tolist()) if 'store_nbr' in df.columns else [1]
+        families = sorted(df['family'].unique().tolist()) if 'family' in df.columns else ['GROCERY I']
+        return stores, families
+
+    def filter_subset(self, df, store_nbr=None, family=None):
+        """Filter merged data to specific store/family combo."""
+        result = df.copy()
+        if store_nbr is not None:
+            result = result[result['store_nbr'] == store_nbr]
+        if family is not None:
+            result = result[result['family'] == family]
+        return result.sort_values('date').reset_index(drop=True)
+
 
 if __name__ == "__main__":
-    # Test the loader
     loader = DataLoader()
     raw_data = loader.load_raw_data()
     df_final = loader.merge_data(raw_data)
+    stores, families = loader.get_store_families(df_final)
+    print(f"Stores: {len(stores)}, Families: {len(families)}")
     print(df_final.head())
