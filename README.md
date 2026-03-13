@@ -310,11 +310,8 @@ This system moves promotion decisions from gut-feel to data-driven:
 
 ---
 
-## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
 
-Dataset by [Corporación Favorita](https://www.kaggle.com/c/favorita-grocery-sales-forecasting) via Kaggle.
 
 ---
 
